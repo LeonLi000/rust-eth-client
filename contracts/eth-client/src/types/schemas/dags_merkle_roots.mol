@@ -1,0 +1,5 @@
+import basic;
+
+table DagsMerkleRoots {
+    dags_merkle_roots: BytesVec,
+}

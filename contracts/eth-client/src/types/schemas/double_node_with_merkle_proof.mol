@@ -1,0 +1,6 @@
+import basic;
+
+table DoubleNodeWithMerkleProof {
+    dag_nodes: BytesVec,
+    proof: BytesVec,
+}

@@ -1,0 +1,7 @@
+import basic;
+
+table Witness {
+    header: Bytes,
+    merkle_proof: BytesVec,
+    cell_dep_index_list: Bytes,
+}

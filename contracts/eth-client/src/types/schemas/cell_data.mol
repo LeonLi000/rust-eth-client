@@ -1,0 +1,6 @@
+import basic;
+
+table CellData {
+    headers: Bytes,
+    user_lockscript: Script,
+}
