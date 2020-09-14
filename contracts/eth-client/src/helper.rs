@@ -54,7 +54,7 @@ pub fn verify_header(
     merkle_root: H128,
     dag_nodes: &[DoubleNodeWithMerkleProof],
 ) -> bool {
-    debug!("header is {:?}, merkle_root is {:?}", header, merkle_root);
+    // debug!("header is {:?}, merkle_root is {:?}", header, merkle_root);
     let (_mix_hash, result) = hashimoto_merkle(
         &header.partial_hash.unwrap(),
         &header.nonce,
@@ -92,6 +92,7 @@ fn hashimoto_merkle(
 ) -> (H256, H256) {
     // Boxed index since ethash::hashimoto gets Fn, but not FnMut
     let mut index = 0;
+    // debug!("nodes: {:?}", nodes);
     // Reuse single Merkle root across all the proofs
     // let merkle_root = dag_merkle_root((header_number as usize / 30000) as u64);
 
@@ -101,6 +102,7 @@ fn hashimoto_merkle(
         ethash::get_full_size(header_number as usize / 30000),
         |offset| {
             let idx = index;
+            debug!("index: {}", index);
             index += 1;
             // Each two nodes are packed into single 128 bytes with Merkle proof
             let node = &nodes[idx / 2];
