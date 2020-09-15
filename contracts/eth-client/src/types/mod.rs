@@ -1,6 +1,7 @@
 mod error;
 mod cell_data_view;
 mod generated;
+mod convert;
 
 pub use error::Error;
 pub use cell_data_view::*;

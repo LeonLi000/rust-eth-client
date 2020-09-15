@@ -1,4 +1,4 @@
-use crate::types::{Error, CellDataView, witness::WitnessReader,basic::ChainReader, dags_merkle_roots::DagsMerkleRootsReader, double_node_with_merkle_proof::DoubleNodeWithMerkleProofReader};
+use crate::types::{Error, CellDataView, witness::WitnessReader, basic::{ChainReader, Uint64}, dags_merkle_roots::DagsMerkleRootsReader, double_node_with_merkle_proof::DoubleNodeWithMerkleProofReader};
 use crate::helper::{*, DoubleNodeWithMerkleProof};
 use alloc::{vec, vec::Vec};
 use ckb_std::{
@@ -8,8 +8,10 @@ use ckb_std::{
 };
 use molecule::prelude::{Reader, Builder, Entity};
 use eth_spv_lib::eth_types::*;
-use crate::types::basic::BytesVec;
+use crate::types::basic::{BytesVec, HeaderInfo, HeaderInfoReader};
+use rlp::Encodable;
 
+pub const HEADER_CACHE_LIMIT: usize = 500;
 
 #[derive(Debug)]
 pub struct CellDataTuple(Option<CellDataView>, Option<CellDataView>);
@@ -17,30 +19,10 @@ pub struct CellDataTuple(Option<CellDataView>, Option<CellDataView>);
 pub fn verify() -> Result<(), Error> {
     let input_data = get_data(Source::GroupInput)?.expect("should not happen");
     let output_data = get_data(Source::GroupOutput)?.expect("should not happen");
-    // verify_capacity()?;
     verify_data(&input_data, &output_data)?;
     debug!("verify data finish");
     verify_witness(&input_data, &output_data)?;
     Ok(())
-}
-
-
-pub fn verify_capacity() -> Result<(), Error> {
-    todo!();
-    // let toCKB_output_cap = load_cell_capacity(0, Source::GroupOutput)?;
-    // let toCKB_input_cap = load_cell_capacity(0, Source::GroupInput)?;
-    // if toCKB_input_cap - toCKB_output_cap != PLEDGE + XT_CELL_CAPACITY {
-    //     return Err(Error::CapacityInvalid);
-    // }
-    // let user_xt_cell_cap = load_cell_capacity(1, Source::Output)?;
-    // if user_xt_cell_cap != PLEDGE {
-    //     return Err(Error::CapacityInvalid);
-    // }
-    // let signer_xt_cell_cap = load_cell_capacity(2, Source::Output)?;
-    // if signer_xt_cell_cap != XT_CELL_CAPACITY {
-    //     return Err(Error::CapacityInvalid);
-    // }
-    // Ok(())
 }
 
 fn verify_data(
@@ -53,7 +35,6 @@ fn verify_data(
     }
     Ok(())
 }
-
 
 
 /// ensure transfer happen on XChain by verifying the spv proof
@@ -70,10 +51,10 @@ fn verify_witness(input: &CellDataView, output: &CellDataView) -> Result<(), Err
     let witness = WitnessReader::new_unchecked(&witness_args);
     // parse header
     let header_raw = witness.header().raw_data();
-    let header: BlockHeader = rlp::decode(header_raw.to_vec().as_slice()).unwrap();
-    debug!("header after decode is {:?}", header);
+    // let header: BlockHeader = rlp::decode(header_raw.to_vec().as_slice()).unwrap();
+
     // check input && output data
-    verify_input_output_data(input, output, header_raw)?;
+    let header = verify_input_output_data(input, output, header_raw)?;
     // parse merkle proof
     let mut proofs = vec![];
     for i in 0..witness.merkle_proof().len() {
@@ -87,52 +68,138 @@ fn verify_witness(input: &CellDataView, output: &CellDataView) -> Result<(), Err
         return Err(Error::InvalidMerkleProofData);
     }
     Ok(())
-
 }
 
-fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_raw: &[u8]) -> Result<(), Error> {
+fn to_u64(data: &Uint64) -> u64 {
+    let mut res = [0u8; 8];
+    res.copy_from_slice(data.as_slice());
+    u64::from_be_bytes(res)
+}
+
+fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_raw: &[u8]) -> Result<BlockHeader, Error> {
+    let header: BlockHeader = rlp::decode(header_raw.to_vec().as_slice()).unwrap();
+    debug!("header after decode is {:?}", header);
+
     if ChainReader::verify(&input.headers, false).is_err() {
-        return Err(Error::InvalidWitness);
+        return Err(Error::InvalidCellData);
     }
     let chain_input_reader = ChainReader::new_unchecked(&input.headers);
     let main_input_reader = chain_input_reader.main();
     debug!("main_input len: {:?}", main_input_reader.len());
     let uncle_input_reader = chain_input_reader.uncle();
     if ChainReader::verify(&output.headers, false).is_err() {
-        return Err(Error::InvalidWitness);
+        return Err(Error::InvalidCellData);
     }
     let chain_output_reader = ChainReader::new_unchecked(&output.headers);
     let main_output_reader = chain_output_reader.main();
     let uncle_output_reader = chain_output_reader.uncle();
     debug!("main_output len: {:?}", main_output_reader.len());
-    if main_output_reader.len() > main_input_reader.len() {
-        assert_eq!(main_output_reader.get_unchecked(main_output_reader.len()-1).raw_data() , header_raw);
-        let mut input_data = vec![];
-        for i in 0..main_input_reader.len() {
-            input_data.push(main_input_reader.get_unchecked(i).raw_data())
-        }
-        input_data.push(header_raw);
-        let mut output_data = vec![];
-        for i in 0..main_output_reader.len() {
-            output_data.push(main_output_reader.get_unchecked(i).raw_data())
-        }
-        assert_eq!(input_data, output_data);
-    } else if uncle_output_reader.len() > uncle_input_reader.len() {
-        assert_eq!(uncle_output_reader.get_unchecked(uncle_output_reader.len()-1).raw_data() , header_raw);
-        let mut input_data = vec![];
-        for i in 0..uncle_input_reader.len() {
-            input_data.push(uncle_input_reader.get_unchecked(i).raw_data())
-        }
-        input_data.push(header_raw);
-        let mut output_data = vec![];
-        for i in 0..uncle_output_reader.len() {
-            output_data.push(uncle_output_reader.get_unchecked(i).raw_data())
-        }
-        assert_eq!(input_data, output_data);
-    } else {
+    // let main_tail = main_output_reader.get_unchecked(main_output_reader.len()-1).raw_data();
+    // header is on main chain.
+    let tail_info_input = main_input_reader.get_unchecked(main_input_reader.len() - 1).raw_data();
+    if HeaderInfoReader::verify(&tail_info_input, false).is_err() {
         return Err(Error::InvalidCellData);
     }
-    Ok(())
+    let tail_info_input_reader = HeaderInfoReader::new_unchecked(tail_info_input);
+    let tail_header_input = tail_info_input_reader.header().raw_data();
+
+    let tail_info_output = main_output_reader.get_unchecked(main_output_reader.len() - 1).raw_data();
+    if HeaderInfoReader::verify(&tail_info_output, false).is_err() {
+        return Err(Error::InvalidCellData);
+    }
+    debug!("tail_info_output: {:?}", tail_info_output);
+    let tail_info_output_reader = HeaderInfoReader::new_unchecked(tail_info_output);
+    let tail_header_output = tail_info_output_reader.header().raw_data();
+    // header is on main chain.
+    if tail_header_output == header_raw {
+        debug!("header is on main chain");
+        let tail_input: BlockHeader = rlp::decode(tail_header_input.to_vec().as_slice()).unwrap();
+        debug!("header parent hash: {:?} tail_input hash: {:?}", header.parent_hash.0, tail_input.hash.unwrap().0);
+        // if header.parent_hash == tail_input.hash => the chain is not reorg.
+        // else do reorg.
+        if tail_input.hash.unwrap().0 == header.parent_hash.0 {
+            debug!("the chain is not reorg.");
+            let prev_difficult: Uint64 = tail_info_input_reader.total_difficulty().to_entity();
+            let left: Uint64 = tail_info_output_reader.total_difficulty().to_entity();
+            let right: Uint64 = header.difficulty.0.as_u64().into();
+            debug!("left u64: {} right u64 {}", to_u64(&left), to_u64(&right).checked_add(to_u64(&prev_difficult)).unwrap());
+            assert_eq!(to_u64(&left), to_u64(&right).checked_add(to_u64(&prev_difficult)).unwrap());
+
+            if main_output_reader.len() > HEADER_CACHE_LIMIT {
+                return Err(Error::InvalidCellData);
+            }
+            if main_input_reader.len() == main_output_reader.len() && main_output_reader.len() == HEADER_CACHE_LIMIT {
+                let mut input_data = vec![];
+                for i in 1..main_input_reader.len() {
+                    input_data.push(main_input_reader.get_unchecked(i).raw_data())
+                }
+                let mut output_data = vec![];
+                for i in 0..main_output_reader.len()-1 {
+                    output_data.push(main_output_reader.get_unchecked(i).raw_data())
+                }
+                assert_eq!(input_data, output_data);
+            } else if main_input_reader.len() < main_output_reader.len(){
+                debug!("the main input len < output len");
+                let mut input_data = vec![];
+                for i in 0..main_input_reader.len() {
+                    input_data.push(main_input_reader.get_unchecked(i).raw_data())
+                }
+                let mut output_data = vec![];
+                for i in 0..main_output_reader.len()-1 {
+                    output_data.push(main_output_reader.get_unchecked(i).raw_data())
+                }
+                assert_eq!(input_data, output_data);
+            } else {
+                return Err(Error::InvalidCellData);
+            }
+        } else {
+            debug!("the chain is reorg.");
+
+        }
+    }
+
+
+    // header is on uncle chain will cause chain org.
+    // let uncle_tail = uncle_output_reader.get_unchecked(uncle_input_reader.len()-1).raw_data();
+    // if main_input_reader.len() {
+    //
+    // }
+
+    // assert_eq!(header_ , header_raw);
+
+    // debug!("difficulty: {:?}",header_info_reader.total_difficulty().raw_data().into());
+    // let mut data = [0u8; 8];
+    // data.copy_from_slice(Uint64::from_slice(&header_info_reader.total_difficulty().raw_data()).expect(""));
+
+
+    // if main_output_reader.len() > main_input_reader.len() {
+    //     assert_eq!(main_output_reader.get_unchecked(main_output_reader.len() - 1).raw_data(), header_raw);
+    //     let mut input_data = vec![];
+    //     for i in 0..main_input_reader.len() {
+    //         input_data.push(main_input_reader.get_unchecked(i).raw_data())
+    //     }
+    //     input_data.push(header_raw);
+    //     let mut output_data = vec![];
+    //     for i in 0..main_output_reader.len() {
+    //         output_data.push(main_output_reader.get_unchecked(i).raw_data())
+    //     }
+    //     assert_eq!(input_data, output_data);
+    // } else if uncle_output_reader.len() > uncle_input_reader.len() {
+    //     assert_eq!(uncle_output_reader.get_unchecked(uncle_output_reader.len() - 1).raw_data(), header_raw);
+    //     let mut input_data = vec![];
+    //     for i in 0..uncle_input_reader.len() {
+    //         input_data.push(uncle_input_reader.get_unchecked(i).raw_data())
+    //     }
+    //     input_data.push(header_raw);
+    //     let mut output_data = vec![];
+    //     for i in 0..uncle_output_reader.len() {
+    //         output_data.push(uncle_output_reader.get_unchecked(i).raw_data())
+    //     }
+    //     assert_eq!(input_data, output_data);
+    // } else {
+    //     return Err(Error::InvalidCellData);
+    // }
+    Ok(header)
 }
 
 fn parse_proof(proof_raw: &[u8]) -> Result<DoubleNodeWithMerkleProof, Error> {

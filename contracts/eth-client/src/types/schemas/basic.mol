@@ -15,3 +15,8 @@ table Chain {
     main: BytesVec,
     uncle: BytesVec,
 }
+
+table HeaderInfo {
+    header: Bytes,
+    total_difficulty: Uint64,
+}
