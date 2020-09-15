@@ -203,7 +203,7 @@ impl TryFrom<DoubleNodeWithMerkleProofJson> for double_node_with_merkle_proof::D
             dag_nodes_vec.push(hex::decode(&proof.dag_nodes[i])?.into());
         }
         let mut proof_vec: Vec<Bytes> = vec![];
-        for i in 0..proof.dag_nodes.len() {
+        for i in 0..proof.proof.len() {
             proof_vec.push(hex::decode(&proof.proof[i])?.into());
         }
         Ok(double_node_with_merkle_proof::DoubleNodeWithMerkleProof::new_builder()

@@ -10,3 +10,8 @@ table Script {
     hash_type:      byte,
     args:           Bytes,
 }
+
+table Chain {
+    main: BytesVec,
+    uncle: BytesVec,
+}

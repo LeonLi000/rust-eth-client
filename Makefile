@@ -4,7 +4,7 @@ schema:
 	moleculec --language rust --schema-file contracts/eth-client/src/types/schemas/dags_merkle_roots.mol > contracts/eth-client/src/types/generated/dags_merkle_roots.rs
 	moleculec --language rust --schema-file contracts/eth-client/src/types/schemas/witness.mol > contracts/eth-client/src/types/generated/witness.rs
 	moleculec --language rust --schema-file contracts/eth-client/src/types/schemas/double_node_with_merkle_proof.mol > contracts/eth-client/src/types/generated/double_node_with_merkle_proof.rs
-	cp contracts/eth-client/src/types/generated/*.rs tests/src/eth-client/types/generated
+	cp contracts/eth-client/src/types/generated/*.rs tests/src/eth_client/types/generated
 
 fmt:
 	cd contracts/eth_client && cargo fmt --all

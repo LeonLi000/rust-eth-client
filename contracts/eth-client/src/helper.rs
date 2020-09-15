@@ -50,11 +50,10 @@ impl DoubleNodeWithMerkleProof {
 
 pub fn verify_header(
     header: &BlockHeader,
-    prev: &BlockHeader,
+    prev: Option<&BlockHeader>,
     merkle_root: H128,
     dag_nodes: &[DoubleNodeWithMerkleProof],
 ) -> bool {
-    // debug!("header is {:?}, merkle_root is {:?}", header, merkle_root);
     let (_mix_hash, result) = hashimoto_merkle(
         &header.partial_hash.unwrap(),
         &header.nonce,
@@ -63,23 +62,26 @@ pub fn verify_header(
         dag_nodes,
     );
 
-    //
     // See YellowPaper formula (50) in section 4.3.4
     // 1. Simplified difficulty check to conform adjusting difficulty bomb
     // 2. Added condition: header.parent_hash() == prev.hash()
-    //
-    U256((result.0).0.into()) < U256(ethash::cross_boundary(header.difficulty.0))
-        // && (!self.validate_ethash
+    let result = U256((result.0).0.into()) < U256(ethash::cross_boundary(header.difficulty.0))
         && (header.difficulty < header.difficulty * 101 / 100
         && header.difficulty > header.difficulty * 99 / 100)
         && header.gas_used <= header.gas_limit
-        && header.gas_limit < prev.gas_limit * 1025 / 1024
-        && header.gas_limit > prev.gas_limit * 1023 / 1024
         && header.gas_limit >= U256(5000.into())
-        && header.timestamp > prev.timestamp
-        && header.number == prev.number + 1
-        && header.parent_hash == prev.hash.unwrap()
-        && header.extra_data.len() <= 32
+        && header.extra_data.len() <= 32;
+    match prev {
+        Some(prev) => {
+            result
+                && header.gas_limit < prev.gas_limit * 1025 / 1024
+                && header.gas_limit > prev.gas_limit * 1023 / 1024
+                && header.timestamp > prev.timestamp
+                && header.number == prev.number + 1
+                && header.parent_hash == prev.hash.unwrap()
+        }
+        None => {result}
+    }
 }
 
 /// Verify merkle paths to the DAG nodes.
@@ -90,19 +92,14 @@ fn hashimoto_merkle(
     merkle_root: H128,
     nodes: &[DoubleNodeWithMerkleProof],
 ) -> (H256, H256) {
-    // Boxed index since ethash::hashimoto gets Fn, but not FnMut
     let mut index = 0;
-    // debug!("nodes: {:?}", nodes);
-    // Reuse single Merkle root across all the proofs
-    // let merkle_root = dag_merkle_root((header_number as usize / 30000) as u64);
-
     let pair = ethash::hashimoto_with_hasher(
         header_hash.0,
         nonce.0,
         ethash::get_full_size(header_number as usize / 30000),
         |offset| {
             let idx = index;
-            debug!("index: {}", index);
+            debug!("hashimoto_with_hasher index: {}", index);
             index += 1;
             // Each two nodes are packed into single 128 bytes with Merkle proof
             let node = &nodes[idx / 2];
@@ -117,7 +114,7 @@ fn hashimoto_merkle(
             data[32..].reverse();
             data.into()
         },
-        hash256,
+        my_keccak256,
         my_keccak512,
     );
 

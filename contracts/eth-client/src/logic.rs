@@ -1,4 +1,4 @@
-use crate::types::{Error, CellDataView, witness::WitnessReader, dags_merkle_roots::DagsMerkleRootsReader, double_node_with_merkle_proof::DoubleNodeWithMerkleProofReader};
+use crate::types::{Error, CellDataView, witness::WitnessReader,basic::ChainReader, dags_merkle_roots::DagsMerkleRootsReader, double_node_with_merkle_proof::DoubleNodeWithMerkleProofReader};
 use crate::helper::{*, DoubleNodeWithMerkleProof};
 use alloc::{vec, vec::Vec};
 use ckb_std::{
@@ -6,23 +6,21 @@ use ckb_std::{
     debug,
     high_level::{load_cell_data, load_witness_args, QueryIter},
 };
-use molecule::prelude::{Reader};
+use molecule::prelude::{Reader, Builder, Entity};
 use eth_spv_lib::eth_types::*;
-
+use crate::types::basic::BytesVec;
 
 
 #[derive(Debug)]
 pub struct CellDataTuple(Option<CellDataView>, Option<CellDataView>);
 
 pub fn verify() -> Result<(), Error> {
-    let input_data = get_data(Source::GroupInput)?;
-    let output_data = get_data(Source::GroupOutput)?;
-    let input_data = input_data.as_ref().expect("should not happen");
-    let output_data= output_data.as_ref().expect("should not happen");
+    let input_data = get_data(Source::GroupInput)?.expect("should not happen");
+    let output_data = get_data(Source::GroupOutput)?.expect("should not happen");
     // verify_capacity()?;
-    verify_data(input_data, output_data)?;
+    verify_data(&input_data, &output_data)?;
     debug!("verify data finish");
-    verify_witness(input_data)?;
+    verify_witness(&input_data, &output_data)?;
     Ok(())
 }
 
@@ -52,6 +50,87 @@ fn verify_data(
     if input_data.user_lockscript.as_ref() != output_data.user_lockscript.as_ref()
     {
         return Err(Error::InvalidDataChange);
+    }
+    Ok(())
+}
+
+
+
+/// ensure transfer happen on XChain by verifying the spv proof
+fn verify_witness(input: &CellDataView, output: &CellDataView) -> Result<(), Error> {
+    let witness_args = load_witness_args(0, Source::GroupInput)?.input_type();
+    if witness_args.is_none() {
+        return Err(Error::InvalidWitness);
+    }
+    let witness_args = witness_args.to_opt().unwrap().raw_data();
+    // debug!("witness_args parsed: {:?}", &witness_args);
+    if WitnessReader::verify(&witness_args, false).is_err() {
+        return Err(Error::InvalidWitness);
+    }
+    let witness = WitnessReader::new_unchecked(&witness_args);
+    // parse header
+    let header_raw = witness.header().raw_data();
+    let header: BlockHeader = rlp::decode(header_raw.to_vec().as_slice()).unwrap();
+    debug!("header after decode is {:?}", header);
+    // check input && output data
+    verify_input_output_data(input, output, header_raw)?;
+    // parse merkle proof
+    let mut proofs = vec![];
+    for i in 0..witness.merkle_proof().len() {
+        let proof_raw = witness.merkle_proof().get_unchecked(i).raw_data();
+        let proof = parse_proof(proof_raw)?;
+        proofs.push(proof);
+    }
+    // parse dep data
+    let merkle_root = parse_dep_data(witness, header.number)?;
+    if !verify_header(&header, Option::None, merkle_root, &proofs) {
+        return Err(Error::InvalidMerkleProofData);
+    }
+    Ok(())
+
+}
+
+fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_raw: &[u8]) -> Result<(), Error> {
+    if ChainReader::verify(&input.headers, false).is_err() {
+        return Err(Error::InvalidWitness);
+    }
+    let chain_input_reader = ChainReader::new_unchecked(&input.headers);
+    let main_input_reader = chain_input_reader.main();
+    debug!("main_input len: {:?}", main_input_reader.len());
+    let uncle_input_reader = chain_input_reader.uncle();
+    if ChainReader::verify(&output.headers, false).is_err() {
+        return Err(Error::InvalidWitness);
+    }
+    let chain_output_reader = ChainReader::new_unchecked(&output.headers);
+    let main_output_reader = chain_output_reader.main();
+    let uncle_output_reader = chain_output_reader.uncle();
+    debug!("main_output len: {:?}", main_output_reader.len());
+    if main_output_reader.len() > main_input_reader.len() {
+        assert_eq!(main_output_reader.get_unchecked(main_output_reader.len()-1).raw_data() , header_raw);
+        let mut input_data = vec![];
+        for i in 0..main_input_reader.len() {
+            input_data.push(main_input_reader.get_unchecked(i).raw_data())
+        }
+        input_data.push(header_raw);
+        let mut output_data = vec![];
+        for i in 0..main_output_reader.len() {
+            output_data.push(main_output_reader.get_unchecked(i).raw_data())
+        }
+        assert_eq!(input_data, output_data);
+    } else if uncle_output_reader.len() > uncle_input_reader.len() {
+        assert_eq!(uncle_output_reader.get_unchecked(uncle_output_reader.len()-1).raw_data() , header_raw);
+        let mut input_data = vec![];
+        for i in 0..uncle_input_reader.len() {
+            input_data.push(uncle_input_reader.get_unchecked(i).raw_data())
+        }
+        input_data.push(header_raw);
+        let mut output_data = vec![];
+        for i in 0..uncle_output_reader.len() {
+            output_data.push(uncle_output_reader.get_unchecked(i).raw_data())
+        }
+        assert_eq!(input_data, output_data);
+    } else {
+        return Err(Error::InvalidCellData);
     }
     Ok(())
 }
@@ -90,53 +169,11 @@ fn parse_dep_data(witness: WitnessReader, number: u64) -> Result<H128, Error> {
         return Err(Error::DagsMerkleRootsDataInvalid);
     }
     let dags_reader = DagsMerkleRootsReader::new_unchecked(&dep_data);
-    // debug!("dags_reader: {:?}", dags_reader);
     let idx: usize = (number / 30000) as usize;
     let merkle_root_tmp = dags_reader.dags_merkle_roots().get_unchecked(idx).raw_data();
     let mut merkle_root = [0u8; 16];
     merkle_root.copy_from_slice(merkle_root_tmp);
     Ok(H128(merkle_root.into()))
-}
-
-/// ensure transfer happen on XChain by verifying the spv proof
-fn verify_witness(data: &CellDataView) -> Result<(), Error> {
-    // debug!("data: {:?}", data);
-    let witness_args = load_witness_args(0, Source::GroupInput)?.input_type();
-    // debug!("witness_args: {:?}", &witness_args);
-    if witness_args.is_none() {
-        return Err(Error::InvalidWitness);
-    }
-    let witness_args = witness_args.to_opt().unwrap().raw_data();
-    // debug!("witness_args parsed: {:?}", &witness_args);
-    if WitnessReader::verify(&witness_args, false).is_err() {
-        return Err(Error::InvalidWitness);
-    }
-    let witness = WitnessReader::new_unchecked(&witness_args);
-    // debug!("witness: {:?}", witness);
-    // parse header
-    let header_raw = witness.header().raw_data();
-    // debug!("header raw is {:?}", header_raw);
-    let header: BlockHeader = rlp::decode(header_raw.to_vec().as_slice()).unwrap();
-    debug!("header after decode is {:?}", header);
-    // parse merkle proof
-    let mut proofs = vec![];
-    for i in 0..witness.merkle_proof().len() {
-        if i == 0 {
-            let proof_raw = DoubleNodeWithMerkleProofReader::new_unchecked(witness.merkle_proof().get_unchecked(i).raw_data());
-            debug!("len: {}", proof_raw.proof().len())
-        }
-        let proof_raw = witness.merkle_proof().get_unchecked(i).raw_data();
-        let proof = parse_proof(proof_raw)?;
-        if i == 0 {
-            debug!("reset proof: {:?}", proof);
-        }
-        proofs.push(proof);
-    }
-    // debug!("proofs: {:?}", proofs);
-    // parse dep data
-    let merkle_root = parse_dep_data(witness, header.number)?;
-    verify_header(&header, &header, merkle_root, &proofs);
-    Ok(())
 }
 
 fn get_data(source: Source) -> Result<Option<CellDataView>, Error> {

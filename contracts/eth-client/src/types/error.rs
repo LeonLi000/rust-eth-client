@@ -10,7 +10,9 @@ pub enum Error {
     TxInvalid,
     InvalidWitness,
     InvalidDataChange,
+    InvalidCellData,
     DagsMerkleRootsDataInvalid,
+    InvalidMerkleProofData,
 }
 
 impl From<SysError> for Error {

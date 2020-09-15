@@ -1,6 +1,6 @@
 import basic;
 
 table CellData {
-    headers: Bytes,
+    headers: Chain,
     user_lockscript: Script,
 }

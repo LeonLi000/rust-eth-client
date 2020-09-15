@@ -3,6 +3,7 @@ use super::error::Error;
 use super::generated::cell_data::CellDataReader;
 use core::result::Result;
 use molecule::prelude::*;
+use crate::types::basic::BytesVec;
 
 
 #[derive(Debug)]
