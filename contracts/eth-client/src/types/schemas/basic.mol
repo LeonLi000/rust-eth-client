@@ -19,4 +19,5 @@ table Chain {
 table HeaderInfo {
     header: Bytes,
     total_difficulty: Uint64,
+    hash: Byte32,
 }
