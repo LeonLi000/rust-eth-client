@@ -6,10 +6,9 @@ use ckb_std::{
     debug,
     high_level::{load_cell_data, load_witness_args, QueryIter},
 };
-use molecule::prelude::{Reader, Builder, Entity};
+use molecule::prelude::{Reader,  Entity};
 use eth_spv_lib::eth_types::*;
-use crate::types::basic::{BytesVec, HeaderInfo, HeaderInfoReader, BytesVecReader};
-use rlp::Encodable;
+use crate::types::basic::{ HeaderInfoReader, BytesVecReader};
 
 pub const MAIN_HEADER_CACHE_LIMIT: usize = 500;
 pub const UNCLE_HEADER_CACHE_LIMIT: usize = 500;
@@ -37,7 +36,6 @@ fn verify_data(
     Ok(())
 }
 
-
 /// ensure transfer happen on XChain by verifying the spv proof
 fn verify_witness(input: &CellDataView, output: &CellDataView) -> Result<(), Error> {
     let witness_args = load_witness_args(0, Source::GroupInput)?.input_type();
@@ -45,15 +43,12 @@ fn verify_witness(input: &CellDataView, output: &CellDataView) -> Result<(), Err
         return Err(Error::InvalidWitness);
     }
     let witness_args = witness_args.to_opt().unwrap().raw_data();
-    // debug!("witness_args parsed: {:?}", &witness_args);
     if WitnessReader::verify(&witness_args, false).is_err() {
         return Err(Error::InvalidWitness);
     }
     let witness = WitnessReader::new_unchecked(&witness_args);
     // parse header
     let header_raw = witness.header().raw_data();
-    // let header: BlockHeader = rlp::decode(header_raw.to_vec().as_slice()).unwrap();
-
     // check input && output data
     let header = verify_input_output_data(input, output, header_raw)?;
     // parse merkle proof
@@ -71,37 +66,8 @@ fn verify_witness(input: &CellDataView, output: &CellDataView) -> Result<(), Err
     Ok(())
 }
 
-fn to_u64(data: &Uint64) -> u64 {
-    let mut res = [0u8; 8];
-    res.copy_from_slice(data.as_slice());
-    u64::from_be_bytes(res)
-}
-
-fn traverse_uncle_chain(uncle_input_reader:BytesVecReader, mut current_hash: H256, mut number:u64) -> Result<(), Error>{
-    let mut index = uncle_input_reader.len()-1;
-    loop {
-        if index == 0 {
-            return Err(Error::InvalidCellData);
-        }
-        let uncle_tail_input = uncle_input_reader.get_unchecked(index).raw_data();
-        if HeaderInfoReader::verify(&uncle_tail_input, false).is_err() {
-            return Err(Error::InvalidCellData);
-        }
-        let uncle_header_info_reader = HeaderInfoReader::new_unchecked(uncle_tail_input);
-        if uncle_header_info_reader.hash().raw_data() == current_hash.0.as_bytes() {
-            let uncle_header_raw = uncle_header_info_reader.header().raw_data();
-            let uncle_header: BlockHeader = rlp::decode(uncle_header_raw.to_vec().as_slice()).unwrap();
-            number -= 1;
-            current_hash = uncle_header.parent_hash;
-            break;
-        } else {
-            index -= 1;
-        }
-    }
-    Ok(())
-}
-
 fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_raw: &[u8]) -> Result<BlockHeader, Error> {
+    debug!("verify input && output data. make sure the main chain is right.");
     let header: BlockHeader = rlp::decode(header_raw.to_vec().as_slice()).unwrap();
     debug!("header after decode is {:?}", header);
 
@@ -110,7 +76,7 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
     }
     let chain_input_reader = ChainReader::new_unchecked(&input.headers);
     let main_input_reader = chain_input_reader.main();
-    debug!("main_input len: {:?}", main_input_reader.len());
+    debug!("input: the main chain length: {:?}", main_input_reader.len());
     let uncle_input_reader = chain_input_reader.uncle();
     if ChainReader::verify(&output.headers, false).is_err() {
         return Err(Error::InvalidCellData);
@@ -118,8 +84,7 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
     let chain_output_reader = ChainReader::new_unchecked(&output.headers);
     let main_output_reader = chain_output_reader.main();
     let uncle_output_reader = chain_output_reader.uncle();
-    debug!("main_output len: {:?}", main_output_reader.len());
-    // let main_tail = main_output_reader.get_unchecked(main_output_reader.len()-1).raw_data();
+    debug!("output: the main chain length: {:?}", main_output_reader.len());
     // header is on main chain.
     let main_tail_info_input = main_input_reader.get_unchecked(main_input_reader.len() - 1).raw_data();
     if HeaderInfoReader::verify(&main_tail_info_input, false).is_err() {
@@ -132,34 +97,36 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
     if HeaderInfoReader::verify(&main_tail_info_output, false).is_err() {
         return Err(Error::InvalidCellData);
     }
-    debug!("main_tail_info_output: {:?}", main_tail_info_output);
     let main_tail_info_output_reader = HeaderInfoReader::new_unchecked(main_tail_info_output);
     let main_tail_header_output = main_tail_info_output_reader.header().raw_data();
 
     // header is on main chain.
     if main_tail_header_output == header_raw {
-        debug!("header is on main chain");
+        debug!("the new header is on main chain");
         assert_eq!(main_tail_info_output_reader.hash().raw_data(), header.hash.unwrap().0.as_bytes());
         let main_tail_input: BlockHeader = rlp::decode(main_tail_header_input.to_vec().as_slice()).unwrap();
-        debug!("header parent hash: {:?} tail_input hash: {:?}", header.parent_hash.0, main_tail_input.hash.unwrap().0);
+        debug!("new header parent hash: {:?} ", header.parent_hash.0);
+        debug!("input main chain tail hash: {:?}", main_tail_input.hash.unwrap().0);
         // if header.parent_hash == tail_input.hash => the chain is not reorg.
         // else do reorg.
         if main_tail_input.hash.unwrap() == header.parent_hash {
-            debug!("the chain is not reorg.");
+            debug!("the main chain is not reorg.");
             let prev_difficult: Uint64 = main_tail_info_input_reader.total_difficulty().to_entity();
             let left: Uint64 = main_tail_info_output_reader.total_difficulty().to_entity();
             let right: Uint64 = header.difficulty.0.as_u64().into();
-            debug!("left u64: {} right u64 {}", to_u64(&left), to_u64(&right).checked_add(to_u64(&prev_difficult)).unwrap());
+            debug!("The total difficulty of the output chain is the total difficulty of the input chain plus the difficulty of the new block");
+            debug!("left difficulty u64: {} right difficulty u64: {}", to_u64(&left), to_u64(&right).checked_add(to_u64(&prev_difficult)).unwrap());
             assert_eq!(to_u64(&left), to_u64(&right).checked_add(to_u64(&prev_difficult)).unwrap());
 
             if main_output_reader.len() > MAIN_HEADER_CACHE_LIMIT {
                 return Err(Error::InvalidCellData);
             }
+            debug!("the uncle chain should be the same");
             verify_original_chain_data(main_input_reader, main_output_reader, MAIN_HEADER_CACHE_LIMIT)?;
             // the uncle chain should be the same.
             assert_eq!(uncle_input_reader.as_slice(),uncle_output_reader.as_slice());
         } else {
-            debug!("the chain is reorg.");
+            debug!("warning: the main chain had been reorged.");
             let left: Uint64 = main_tail_info_input_reader.total_difficulty().to_entity();
             let right: Uint64 = main_tail_info_output_reader.total_difficulty().to_entity();
             if to_u64(&right) >= to_u64(&left) {// header.number < main_tail_input.number
@@ -172,7 +139,7 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
                     }
                     // find parent header.
                     if main_tail_input.number <= number { // the parent header is on uncle chain.
-                        traverse_uncle_chain(uncle_input_reader, current_hash, number)?;
+                        traverse_uncle_chain(uncle_input_reader, &mut current_hash, &mut number)?;
                     } else {
                         let offset = (main_tail_input.number - number-1) as usize;
                         if offset > main_input_reader.len() {
@@ -196,7 +163,7 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
                             assert_eq!(input_data, output_data);
                             break;
                         } else {// the parent header is on uncle chain.
-                            traverse_uncle_chain(uncle_input_reader, current_hash, number)?;
+                            traverse_uncle_chain(uncle_input_reader, &mut current_hash, &mut number)?;
                         }
                     }
                 }
@@ -205,13 +172,40 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
             }
         }
     } else {
+        debug!("warning: the new header is not on main chain.");
         // the header is on uncle chain. just do append.
         verify_original_chain_data(uncle_input_reader, uncle_output_reader, UNCLE_HEADER_CACHE_LIMIT)?;
         // the main chain should be the same.
         assert_eq!(main_output_reader.as_slice(),main_input_reader.as_slice());
     }
-    assert_eq!(main_output_reader.get_unchecked(main_output_reader.len() - 1).raw_data(), header_raw);
+    // assert_eq!(main_output_reader.get_unchecked(main_output_reader.len() - 1).raw_data(), header_raw);
     Ok(header)
+}
+
+fn traverse_uncle_chain(uncle_input_reader: BytesVecReader,  current_hash: &mut H256,  number: &mut u64) -> Result<(), Error>{
+    let mut index = uncle_input_reader.len()-1;
+    loop {
+        if index == 0 {
+            return Err(Error::InvalidCellData);
+        }
+        let uncle_tail_input = uncle_input_reader.get_unchecked(index).raw_data();
+        if HeaderInfoReader::verify(&uncle_tail_input, false).is_err() {
+            return Err(Error::InvalidCellData);
+        }
+        let uncle_header_info_reader = HeaderInfoReader::new_unchecked(uncle_tail_input);
+        if uncle_header_info_reader.hash().raw_data() == current_hash.0.as_bytes() {
+            let uncle_header_raw = uncle_header_info_reader.header().raw_data();
+            let uncle_header: BlockHeader = rlp::decode(uncle_header_raw.to_vec().as_slice()).unwrap();
+            // TODO: make sure the header on uncle chain also exist on the main chain.
+
+            *number -= 1;
+            *current_hash = uncle_header.parent_hash;
+            break;
+        } else {
+            index -= 1;
+        }
+    }
+    Ok(())
 }
 
 fn verify_original_chain_data(uncle_input_reader: BytesVecReader, uncle_output_reader: BytesVecReader, limit: usize) -> Result<(), Error> {
@@ -291,4 +285,10 @@ fn get_data(source: Source) -> Result<Option<CellDataView>, Error> {
         )?)),
         _ => Err(Error::TxInvalid),
     }
+}
+
+fn to_u64(data: &Uint64) -> u64 {
+    let mut res = [0u8; 8];
+    res.copy_from_slice(data.as_slice());
+    u64::from_be_bytes(res)
 }

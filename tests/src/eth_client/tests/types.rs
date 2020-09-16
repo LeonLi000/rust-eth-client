@@ -16,25 +16,19 @@ pub struct Output {
 
 pub struct Witness {
     pub cell_dep_index_list: Vec<u8>,
-    pub header: String,
+    pub header: Vec<u8>,
     pub merkle_proof: Vec<DoubleNodeWithMerkleProof>,
 }
 
 pub struct TestCase {
     pub input_capacity: u64,
     pub output_capacity: u64,
-    pub cell_data: CellDataTest,
-    // pub outputs: Vec<Output>,
+    pub input_data: molecule::bytes::Bytes,
+    pub output_data: molecule::bytes::Bytes,
     pub witness: Witness,
     pub cell_deps_data: RootsCollectionRaw,
     pub expect_return_code: i8,
 }
-
-pub struct CellDataTest {
-    pub user_lockscript: Script,
-    pub headers: Vec<String>,
-}
-
 
 #[derive(Debug)]
 pub struct Hex(pub Vec<u8>);
@@ -103,7 +97,7 @@ pub fn read_roots_collection() -> RootsCollection {
 
 pub fn read_roots_collection_raw() -> RootsCollectionRaw {
     serde_json::from_reader(
-        std::fs::File::open(std::path::Path::new("/Users/leon/dev/rust/leon/rust-eth-client/tests/src/eth_client/tests/data/dag_merkle_roots.json")).unwrap(),
+        std::fs::File::open(std::path::Path::new("../tests/src/eth_client/tests/data/dag_merkle_roots.json")).unwrap(),
     )
         .unwrap()
 }
@@ -142,7 +136,6 @@ impl From<BlockWithProofsRaw> for BlockWithProofs {
 }
 
 pub fn read_block(filename: String) -> BlockWithProofs {
-    dbg!("filename: {:?}", &filename);
     read_block_raw(filename).into()
 }
 

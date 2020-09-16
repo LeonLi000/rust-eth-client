@@ -1,6 +1,6 @@
 use super::generated::basic::{Byte32, Byte4, Bytes, Uint32, Uint64};
 use molecule::prelude::{Builder, Byte, Entity};
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
 impl From<Vec<u8>> for Bytes {
     fn from(v: Vec<u8>) -> Self {
