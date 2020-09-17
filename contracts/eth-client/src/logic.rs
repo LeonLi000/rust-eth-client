@@ -140,7 +140,7 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
                         // let header_temp: BlockHeader = rlp::decode(header_temp.to_vec().as_slice()).unwrap();
                         if header_info_temp_reader.hash().raw_data() == current_hash.0.as_bytes() {// the parent header is on main chain.
                             let mut input_data = vec![];
-                            for i in 1..main_input_reader.len()-1-offset {
+                            for i in 0..main_input_reader.len()-1-offset {
                                 input_data.push(main_input_reader.get_unchecked(i).raw_data())
                             }
                             let mut output_data = vec![];
