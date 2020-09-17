@@ -19,20 +19,7 @@ pub struct CellDataTuple(Option<CellDataView>, Option<CellDataView>);
 pub fn verify() -> Result<(), Error> {
     let input_data = get_data(Source::GroupInput)?.expect("should not happen");
     let output_data = get_data(Source::GroupOutput)?.expect("should not happen");
-    verify_data(&input_data, &output_data)?;
-    debug!("verify data finish");
     verify_witness(&input_data, &output_data)?;
-    Ok(())
-}
-
-fn verify_data(
-    input_data: &CellDataView,
-    output_data: &CellDataView,
-) -> Result<(), Error> {
-    if input_data.user_lockscript.as_ref() != output_data.user_lockscript.as_ref()
-    {
-        return Err(Error::InvalidDataChange);
-    }
     Ok(())
 }
 

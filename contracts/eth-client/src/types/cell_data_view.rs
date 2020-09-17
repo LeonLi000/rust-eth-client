@@ -7,7 +7,6 @@ use molecule::prelude::*;
 
 #[derive(Debug)]
 pub struct CellDataView {
-    pub user_lockscript: Bytes,
     pub headers: Bytes,
 }
 
@@ -16,10 +15,8 @@ impl CellDataView {
         CellDataReader::verify(slice, false).map_err(|_| Error::Encoding)?;
         let data_reader = CellDataReader::new_unchecked(slice);
         let headers = data_reader.headers().to_entity().as_bytes();
-        let user_lockscript = data_reader.user_lockscript().to_entity().as_bytes();
         Ok(CellDataView {
             headers,
-            user_lockscript,
         })
     }
 }

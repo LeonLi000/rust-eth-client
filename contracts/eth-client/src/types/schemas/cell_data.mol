@@ -2,5 +2,4 @@ import basic;
 
 table CellData {
     headers: Chain,
-    user_lockscript: Script,
 }

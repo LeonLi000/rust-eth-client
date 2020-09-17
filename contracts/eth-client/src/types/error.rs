@@ -9,7 +9,6 @@ pub enum Error {
     // Add customized errors here...
     TxInvalid,
     InvalidWitness,
-    InvalidDataChange,
     InvalidCellData,
     DagsMerkleRootsDataInvalid,
     InvalidMerkleProofData,
