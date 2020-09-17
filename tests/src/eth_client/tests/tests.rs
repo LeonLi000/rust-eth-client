@@ -4,7 +4,6 @@ use crate::eth_client::types::{
 };
 use helper::run_test_case;
 use types::*;
-use ckb_testtool::{builtin::ALWAYS_SUCCESS, context::Context};
 use rlp;
 use eth_spv_lib::eth_types::*;
 use molecule::prelude::{Entity, Builder};

@@ -50,7 +50,7 @@ impl DoubleNodeWithMerkleProof {
 
 pub fn verify_header(
     header: &BlockHeader,
-    prev: Option<&BlockHeader>,
+    prev: Option<BlockHeader>,
     merkle_root: H128,
     dag_nodes: &[DoubleNodeWithMerkleProof],
 ) -> bool {
@@ -61,7 +61,7 @@ pub fn verify_header(
         merkle_root,
         dag_nodes,
     );
-
+    debug!("verify_header header: {:?}", header);
     // See YellowPaper formula (50) in section 4.3.4
     // 1. Simplified difficulty check to conform adjusting difficulty bomb
     // 2. Added condition: header.parent_hash() == prev.hash()
@@ -73,6 +73,7 @@ pub fn verify_header(
         && header.extra_data.len() <= 32;
     match prev {
         Some(prev) => {
+            debug!("verify_header prev: {:?}", prev);
             result
                 && header.gas_limit < prev.gas_limit * 1025 / 1024
                 && header.gas_limit > prev.gas_limit * 1023 / 1024
