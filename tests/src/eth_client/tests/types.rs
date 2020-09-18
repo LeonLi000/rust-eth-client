@@ -23,7 +23,7 @@ pub struct Witness {
 pub struct TestCase {
     pub input_capacity: u64,
     pub output_capacity: u64,
-    pub input_data: molecule::bytes::Bytes,
+    pub input_data: Option<molecule::bytes::Bytes>,
     pub output_data: molecule::bytes::Bytes,
     pub witness: Witness,
     pub cell_deps_data: RootsCollectionRaw,

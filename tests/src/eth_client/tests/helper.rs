@@ -31,19 +31,27 @@ pub fn run_test_case(case: TestCase) {
     let always_success_lockscript_dep = CellDep::new_builder()
         .out_point(always_success_out_point)
         .build();
-
-    let input_cell_out_point = context.create_cell(
-        CellOutput::new_builder()
-            .capacity(case.input_capacity.pack())
-            .lock(always_success_lockscript.clone())
-            .type_(Some(typescript.clone()).pack())
-            .build(),
-        case.input_data,
-    );
+    let input_cell_out_point = match case.input_data {
+        Some(_) => context.create_cell(
+            CellOutput::new_builder()
+                .capacity(case.input_capacity.pack())
+                .lock(always_success_lockscript.clone())
+                .type_(Some(typescript.clone()).pack())
+                .build(),
+            case.input_data.unwrap(),
+        ),
+        None => context.create_cell(
+            CellOutput::new_builder()
+                .capacity(case.input_capacity.pack())
+                .lock(always_success_lockscript.clone())
+                .build(),
+            Bytes::new(),
+        ),
+    };
     let input_cell = CellInput::new_builder()
         .previous_output(input_cell_out_point)
         .build();
-    let inputs = vec![input_cell];
+    // let inputs = vec![input_cell];
     let outputs = vec![CellOutput::new_builder()
         .capacity(case.output_capacity.pack())
         .type_(Some(typescript.clone()).pack())
@@ -97,9 +105,8 @@ pub fn run_test_case(case: TestCase) {
     let dep_data: dags_merkle_roots::DagsMerkleRoots = dep_data_string.try_into().unwrap();
     let data_out_point = context.deploy_cell(dep_data.as_bytes());
     let data_dep = CellDep::new_builder().out_point(data_out_point).build();
-
     let tx = TransactionBuilder::default()
-        .inputs(inputs)
+        .input(input_cell)
         .outputs(outputs)
         .outputs_data(outputs_data.pack())
         .cell_dep(data_dep)
