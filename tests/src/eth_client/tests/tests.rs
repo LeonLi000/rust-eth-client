@@ -1,4 +1,5 @@
 use super::*;
+use futures::future::join_all;
 use crate::eth_client::types::{
     generated::{basic::BytesVec, Chain}
 };
@@ -7,9 +8,25 @@ use types::*;
 use rlp;
 use eth_spv_lib::eth_types::*;
 use molecule::prelude::{Entity, Builder};
+use rlp::RlpStream;
+use web3::futures::Future;
+use web3::types::{Block, H256};
+use lazy_static::lazy_static;
+use hex;
 
 const MAX_CYCLES: u64 = 10_000_000;
 
+
+lazy_static! {
+    static ref WEB3RS: web3::Web3<web3::transports::Http> = {
+        let (eloop, transport) = web3::transports::Http::new(
+            "https://mainnet.infura.io/v3/9c7178cede9f4a8a84a151d058bd609c",
+        )
+        .unwrap();
+        eloop.into_remote();
+        web3::Web3::new(transport)
+    };
+}
 
 #[test]
 fn test_add_block_2() {
@@ -53,6 +70,88 @@ fn test_add_block_3() {
     };
     let case = generate_correct_case(Option::Some(input_data.as_bytes()), output_data.as_bytes(), witness);
     run_test_case(case);
+}
+
+#[test]
+fn test_add_block_68_69() {
+    let blocks_with_proofs: Vec<BlockWithProofs> = ["../tests/src/eth_client/tests/data/height-10913468.json","../tests/src/eth_client/tests/data/height-10913469-1.json"]
+        .iter()
+        .map(|filename| read_block((&filename).to_string()))
+        .collect();
+    let block_with_proof_2 = blocks_with_proofs.get(0).expect("error");
+    let block_with_proof_3 = blocks_with_proofs.get(1).expect("error");
+
+    let (input_data_raw, input_difficulty) = create_data(block_with_proof_2, 0);
+    let input_data = create_cell_data(input_data_raw.clone());
+    let mut output_data_raw = input_data_raw.clone();
+    let (output_data_raw_temp,_) = create_data(block_with_proof_3, input_difficulty);
+    for i in 0..output_data_raw_temp.clone().len() {
+        output_data_raw.push(output_data_raw_temp[i].clone());
+    }
+    let output_data = create_cell_data(output_data_raw);
+    let witness = Witness {
+        cell_dep_index_list: vec![0],
+        header: block_with_proof_3.header_rlp.0.clone(),
+        merkle_proof: block_with_proof_3.to_double_node_with_merkle_proof_vec(),
+    };
+    let case = generate_correct_case(Option::Some(input_data.as_bytes()), output_data.as_bytes(), witness);
+    run_test_case(case);
+}
+
+#[test]
+fn test_get_block() {
+    get_blocks(&WEB3RS, 10913468,10913469);
+}
+
+fn get_blocks(
+    web3rust: &web3::Web3<web3::transports::Http>,
+    start: usize,
+    stop: usize,
+) -> (Vec<Vec<u8>>, Vec<H256>) {
+    // let mut data = [0u8; 32];
+    // data.copy_from_slice(hex::decode("f31fbc9f7c55884a1c514a034f35f1818932685c63ee7381f99499a98b10ba97").expect("error").as_slice());
+    // data.copy_from_slice(hex::decode("343077171af52be4a1fd88cf1108250b80980d2497c169add2c3d182b7684b7d").expect("error").as_slice());
+    // let hash = H256(data.into());
+    // println!("hash: {:?}", hash);
+    let futures = (start..stop)
+        .map(|i| web3rust.eth().block((i as u64).into()))
+        // .map(|i| web3rust.eth().block(BlockId::Hash(hash)))
+        .collect::<Vec<_>>();
+    let block_headers = join_all(futures).wait().unwrap();
+
+    let mut blocks: Vec<Vec<u8>> = vec![];
+    let mut hashes: Vec<H256> = vec![];
+    for block_header in block_headers {
+        let mut stream = RlpStream::new();
+        rlp_append(&block_header.clone().unwrap(), &mut stream);
+        blocks.push(stream.out());
+        hashes.push(H256(block_header.clone().unwrap().hash.unwrap().0.into()));
+    }
+    for i in 0..blocks.len() {
+        println!("header rlp: {:?}",  hex::encode(blocks[i].clone()));
+    }
+
+    (blocks, hashes)
+}
+
+// Wish to avoid this code and use web3+rlp libraries directly
+fn rlp_append<TX>(header: &Block<TX>, stream: &mut RlpStream) {
+    stream.begin_list(15);
+    stream.append(&header.parent_hash);
+    stream.append(&header.uncles_hash);
+    stream.append(&header.author);
+    stream.append(&header.state_root);
+    stream.append(&header.transactions_root);
+    stream.append(&header.receipts_root);
+    stream.append(&header.logs_bloom);
+    stream.append(&header.difficulty);
+    stream.append(&header.number.unwrap());
+    stream.append(&header.gas_limit);
+    stream.append(&header.gas_used);
+    stream.append(&header.timestamp);
+    stream.append(&header.extra_data.0);
+    stream.append(&header.mix_hash.unwrap());
+    stream.append(&header.nonce.unwrap());
 }
 
 fn generate_correct_case(input: Option<molecule::bytes::Bytes>, output:molecule::bytes::Bytes, witness_:Witness) -> TestCase {
