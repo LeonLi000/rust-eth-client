@@ -157,6 +157,10 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
             debug!("warning: the main chain had been reorged.");
             let left = main_tail_info_input_reader.total_difficulty().raw_data();
             let right = main_tail_info_output_reader.total_difficulty().raw_data();
+            //FIXME: @leon difficulty need verify! right == header.difficulty + header.parent.total_difficulty
+            let (_, difficulty) = get_parent_header(header.clone(), main_input_reader, uncle_input_reader)?;
+            assert_eq!(to_u64(right), header.difficulty.0.as_u64() + difficulty, "invalid difficulty.");
+
             if to_u64(&right) >= to_u64(&left) {// header.number < main_tail_input.number
                 // assert_eq!(main_tail_input.number - header.number > 0, true)
                 let mut number = header.number - 1;
@@ -204,7 +208,8 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
         verify_original_chain_data(uncle_input_reader, uncle_output_reader, UNCLE_HEADER_CACHE_LIMIT)?;
         // the main chain should be the same.
         assert_eq!(main_output_reader.as_slice(), main_input_reader.as_slice());
-        prev = Option::Some(get_parent_header(header.clone(), main_input_reader, uncle_input_reader)?);
+        let (_prev, _) = get_parent_header(header.clone(), main_input_reader, uncle_input_reader)?;
+        prev = Option::Some(_prev);
     }
     // assert_eq!(main_output_reader.get_unchecked(main_output_reader.len() - 1).raw_data(), header_raw);
     Ok((header, prev))
@@ -220,6 +225,15 @@ fn extra_header(header_info_raw: &[u8]) -> Result<BlockHeader, Error> {
     Ok(header)
 }
 
+fn extra_difficulty(header_info_raw: &[u8]) -> Result<u64, Error> {
+    if HeaderInfoReader::verify(&header_info_raw, false).is_err() {
+        return Err(Error::InvalidCellData);
+    }
+    let reader = HeaderInfoReader::new_unchecked(header_info_raw);
+    let total_difficulty = reader.total_difficulty().raw_data();
+    Ok(to_u64(total_difficulty))
+}
+
 fn extra_hash(header_info_raw: &[u8]) -> Result<&[u8], Error> {
     if HeaderInfoReader::verify(&header_info_raw, false).is_err() {
         return Err(Error::InvalidCellData);
@@ -229,14 +243,15 @@ fn extra_hash(header_info_raw: &[u8]) -> Result<&[u8], Error> {
     Ok(hash)
 }
 
-fn get_parent_header(header: BlockHeader, main_input_reader: BytesVecReader, uncle_input_reader: BytesVecReader) -> Result<BlockHeader, Error> {
+fn get_parent_header(header: BlockHeader, main_input_reader: BytesVecReader, uncle_input_reader: BytesVecReader) -> Result<(BlockHeader, u64), Error> {
     let main_tail_info = main_input_reader.get_unchecked(main_input_reader.len()-1).raw_data();
     let main_tail = extra_header(main_tail_info)?;
     let offset = (main_tail.number - header.number + 1) as usize;
     let target_raw = main_input_reader.get_unchecked(main_input_reader.len()-1-offset).raw_data();
     let target = extra_header(target_raw)?;
     if target.hash.unwrap() == header.parent_hash {
-        Ok(target)
+        let difficulty = extra_difficulty(target_raw)?;
+        Ok((target, difficulty))
     } else {
         let mut index = (uncle_input_reader.len()-1) as isize;
         loop {
@@ -246,7 +261,8 @@ fn get_parent_header(header: BlockHeader, main_input_reader: BytesVecReader, unc
             let uncle_tail_input = uncle_input_reader.get_unchecked(index as usize).raw_data();
             let uncle_header = extra_header(uncle_tail_input)?;
             if uncle_header.hash.unwrap() == header.hash.unwrap() {
-                return Ok(uncle_header);
+                let difficulty = extra_difficulty(uncle_tail_input)?;
+                return Ok((uncle_header, difficulty));
             } else {
                 index -= 1;
             }
