@@ -36,7 +36,7 @@ fn test_add_block_2() {
         .collect();
     let block_with_proof_2 = blocks_with_proofs.get(0).expect("error");
     let (output_data_raw,_) = create_data(block_with_proof_2, 0);
-    let output_data = create_cell_data(output_data_raw, Option::None);
+    let output_data = create_cell_data(vec![output_data_raw], Option::None);
     let witness = Witness {
         cell_dep_index_list: vec![0],
         header: block_with_proof_2.header_rlp.0.clone(),
@@ -56,13 +56,11 @@ fn test_add_block_3() {
     let block_with_proof_3 = blocks_with_proofs.get(1).expect("error");
 
     let (input_data_raw, input_difficulty) = create_data(block_with_proof_2, 0);
-    let input_data = create_cell_data(input_data_raw.clone(),Option::None);
-    let mut output_data_raw = input_data_raw.clone();
-    let (output_data_raw_temp,_) = create_data(block_with_proof_3, input_difficulty);
-    for i in 0..output_data_raw_temp.clone().len() {
-        output_data_raw.push(output_data_raw_temp[i].clone());
-    }
-    let output_data = create_cell_data(output_data_raw, Option::None);
+    let input_data = create_cell_data(vec![input_data_raw.clone()],Option::None);
+
+    let (output_data_raw,_) = create_data(block_with_proof_3, input_difficulty);
+    let output_data_vec = vec![input_data_raw.clone(), output_data_raw.clone()];
+    let output_data = create_cell_data(output_data_vec, Option::None);
     let witness = Witness {
         cell_dep_index_list: vec![0],
         header: block_with_proof_3.header_rlp.0.clone(),
@@ -82,13 +80,11 @@ fn test_add_block_68_69() {
     let block_with_proof_69 = blocks_with_proofs.get(1).expect("error");
 
     let (input_data_raw, input_difficulty) = create_data(block_with_proof_68, 0);
-    let input_data = create_cell_data(input_data_raw.clone(), Option::None);
-    let mut output_data_raw = input_data_raw.clone();
-    let (output_data_raw_temp,_) = create_data(block_with_proof_69, input_difficulty);
-    for i in 0..output_data_raw_temp.clone().len() {
-        output_data_raw.push(output_data_raw_temp[i].clone());
-    }
-    let output_data = create_cell_data(output_data_raw,Option::None);
+    let input_data = create_cell_data(vec![input_data_raw.clone()], Option::None);
+
+    let (output_data_raw,_) = create_data(block_with_proof_69, input_difficulty);
+    let output_data_vec = vec![input_data_raw.clone(), output_data_raw.clone()];
+    let output_data = create_cell_data(output_data_vec,Option::None);
     let witness = Witness {
         cell_dep_index_list: vec![0],
         header: block_with_proof_69.header_rlp.0.clone(),
@@ -110,15 +106,12 @@ fn test_add_block_69_reorg() {
 
     let (input_data_raw_68, input_difficulty_68) = create_data(block_with_proof_68, 0);
     let (input_data_raw_69_1, input_difficulty_69_1) = create_data(block_with_proof_69_1, input_difficulty_68);
-    let mut input_data_raw = input_data_raw_68.clone();
-    input_data_raw.push(input_data_raw_69_1[0].clone());
-    let input_data = create_cell_data(input_data_raw.clone(), Option::None);
+    let input_data_vec = vec![input_data_raw_68.clone(), input_data_raw_69_1.clone()];
+    let input_data = create_cell_data(input_data_vec, Option::None);
 
-    let mut output_data_raw = input_data_raw_68.clone();
     let (output_data_raw_temp,_) = create_data(block_with_proof_69, input_difficulty_69_1);
-    output_data_raw.push(output_data_raw_temp[0].clone());
-
-    let output_data = create_cell_data(output_data_raw, Option::Some(input_data_raw_69_1));
+    let output_data_vec = vec![input_data_raw_68.clone(), output_data_raw_temp.clone()];
+    let output_data = create_cell_data(output_data_vec, Option::Some(vec![input_data_raw_69_1]));
     let witness = Witness {
         cell_dep_index_list: vec![0],
         header: block_with_proof_69.header_rlp.0.clone(),
@@ -140,14 +133,12 @@ fn test_add_block_69_without_reorg() {
 
     let (input_data_raw_68, input_difficulty_68) = create_data(block_with_proof_68, 0);
     let (input_data_raw_69, _) = create_data(block_with_proof_69, input_difficulty_68);
-    let mut input_data_raw = input_data_raw_68.clone();
-    input_data_raw.push(input_data_raw_69[0].clone());
-    let input_data = create_cell_data(input_data_raw.clone(), Option::None);
+    let input_data_vec = vec![input_data_raw_68.clone(), input_data_raw_69.clone()];
+    let input_data = create_cell_data(input_data_vec, Option::None);
 
-    let mut output_data_raw = input_data_raw.clone();
     let (output_data_raw_temp,_) = create_data(block_with_proof_69_1, 0);
-
-    let output_data = create_cell_data(output_data_raw, Option::Some(output_data_raw_temp));
+    let output_data_vec = vec![input_data_raw_68.clone(), input_data_raw_69.clone()];
+    let output_data = create_cell_data(output_data_vec, Option::Some(vec![output_data_raw_temp.clone()]));
     let witness = Witness {
         cell_dep_index_list: vec![0],
         header: block_with_proof_69_1.header_rlp.0.clone(),
@@ -225,13 +216,13 @@ fn generate_correct_case(input: Option<molecule::bytes::Bytes>, output:molecule:
     }
 }
 
-fn create_data(block_with_proof: &BlockWithProofs, pre_block_difficulty: u64) -> (Vec<Bytes>, u64) {
+fn create_data(block_with_proof: &BlockWithProofs, pre_block_difficulty: u64) -> (Bytes, u64) {
     let header: BlockHeader = rlp::decode(block_with_proof.header_rlp.0.as_slice()).unwrap();
     let header_info = basic::HeaderInfo::new_builder().header(basic::Bytes::from(block_with_proof.header_rlp.0.clone()))
         .total_difficulty(header.difficulty.0.as_u64().checked_add(pre_block_difficulty).unwrap().into())
         .hash(basic::Byte32::from_slice(header.hash.unwrap().0.as_bytes()).unwrap() )
         .build();
-    (vec![header_info.as_slice().to_vec().into()], header.difficulty.0.as_u64().checked_add(pre_block_difficulty).unwrap())
+    (header_info.as_slice().to_vec().into(), header.difficulty.0.as_u64().checked_add(pre_block_difficulty).unwrap())
 }
 
 fn create_cell_data(data: Vec<basic::Bytes>, uncle: Option<Vec<basic::Bytes>>) -> CellData {
