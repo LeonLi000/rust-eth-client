@@ -167,17 +167,20 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
                     }
                     // find parent header.
                     if main_tail_input.number <= number { // the parent header is on uncle chain.
+                        debug!("the parent header is on uncle chain");
                         traverse_uncle_chain(uncle_input_reader, &mut current_hash, &mut number)?;
                     } else {
-                        let offset = (main_tail_input.number - number-1) as usize;
+                        let offset = (main_tail_input.number - number) as usize;
+                        debug!("offset: {:?}", offset);
                         if offset > main_input_reader.len() {
                             return Err(Error::InvalidCellData);
                         }
                         let header_info_temp = main_input_reader.get_unchecked(main_input_reader.len()-1-offset).raw_data();
                         let hash_temp = extra_hash(header_info_temp)?;
+                        debug!("hash_temp: {:?} current_hash: {:?}", hash_temp, current_hash.0.as_bytes());
                         if hash_temp == current_hash.0.as_bytes() {// the parent header is on main chain.
                             let mut input_data = vec![];
-                            for i in 0..main_input_reader.len()-1-offset {
+                            for i in 0..main_input_reader.len()-offset {
                                 input_data.push(main_input_reader.get_unchecked(i).raw_data())
                             }
                             let mut output_data = vec![];
@@ -229,11 +232,11 @@ fn extra_hash(header_info_raw: &[u8]) -> Result<&[u8], Error> {
 fn get_parent_header(header: BlockHeader, main_input_reader: BytesVecReader, uncle_input_reader: BytesVecReader) -> Result<BlockHeader, Error> {
     let main_tail_info = main_input_reader.get_unchecked(main_input_reader.len()-1).raw_data();
     let main_tail = extra_header(main_tail_info)?;
-    let offset = (main_tail.number - header.number-1) as usize;
+    let offset = (main_tail.number - header.number + 1) as usize;
     let target_raw = main_input_reader.get_unchecked(main_input_reader.len()-1-offset).raw_data();
     let target = extra_header(target_raw)?;
-    if target.hash.unwrap() == header.hash.unwrap() {
-        Ok(header)
+    if target.hash.unwrap() == header.parent_hash {
+        Ok(target)
     } else {
         let mut index = (uncle_input_reader.len()-1) as isize;
         loop {
@@ -252,6 +255,7 @@ fn get_parent_header(header: BlockHeader, main_input_reader: BytesVecReader, unc
 }
 
 fn traverse_uncle_chain(uncle_input_reader: BytesVecReader,  current_hash: &mut H256,  number: &mut u64) -> Result<(), Error>{
+    debug!("index: {:?}", uncle_input_reader.len());
     let mut index = (uncle_input_reader.len()-1) as isize;
     loop {
         if index < 0 {
