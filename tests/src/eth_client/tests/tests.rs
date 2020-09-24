@@ -249,6 +249,135 @@ fn test_add_block_37_38_39_reorg() {
 }
 
 #[test]
+fn test_add_block_37_45_reorg() {
+    let blocks_with_proofs: Vec<BlockWithProofs> =
+        [
+            "../tests/src/eth_client/tests/data/height-10917837.json"
+            , "../tests/src/eth_client/tests/data/height-10917838.json"
+            ,"../tests/src/eth_client/tests/data/height-10917839.json"
+            , "../tests/src/eth_client/tests/data/height-10917840.json"
+            , "../tests/src/eth_client/tests/data/height-10917841.json"
+            ,"../tests/src/eth_client/tests/data/height-10917842.json"
+            , "../tests/src/eth_client/tests/data/height-10917843.json"
+            , "../tests/src/eth_client/tests/data/height-10917844.json"
+            ,"../tests/src/eth_client/tests/data/height-10917845.json"
+            , "../tests/src/eth_client/tests/data/height-10917838-1.json"
+            , "../tests/src/eth_client/tests/data/height-10917839-1.json"
+            ,"../tests/src/eth_client/tests/data/height-10917845-1.json"
+        ]
+            .iter()
+            .map(|filename| read_block((&filename).to_string()))
+            .collect();
+
+    let mut input_data_vec = vec![];
+    let mut output_data_vec = vec![];
+    let mut pre_difficulty: u64 = 0;
+    let mut difficulty_37: u64 = 0;
+    let mut difficulty_38: u64 = 0;
+    for i in 0..8 {
+        let block_with_proof = blocks_with_proofs.get(i).expect("error");
+        let (input_data_raw, input_difficulty) = create_data(block_with_proof, pre_difficulty);
+        pre_difficulty = input_difficulty;
+        if i == 0 {
+            difficulty_37 = input_difficulty;
+        }
+        if i == 1 {
+            difficulty_38 = input_difficulty;
+        }
+        input_data_vec.push(input_data_raw.clone());
+        output_data_vec.push(input_data_raw.clone());
+    }
+    let block_with_proof_45_1 = blocks_with_proofs.get(11).expect("error");
+    let (input_data_raw_45_1, _) = create_data(block_with_proof_45_1, pre_difficulty);
+    input_data_vec.push(input_data_raw_45_1.clone());
+
+    let block_with_proof_38_1 = blocks_with_proofs.get(9).expect("error");
+    let block_with_proof_39_1 = blocks_with_proofs.get(10).expect("error");
+    let (input_data_raw_38_1, _) = create_data(block_with_proof_38_1, difficulty_37);
+    let (input_data_raw_39_1, _) = create_data(block_with_proof_39_1, difficulty_38);
+    let uncle_data_vec = vec![input_data_raw_38_1.clone(), input_data_raw_39_1.clone()];
+    let input_data = create_cell_data(input_data_vec, Option::Some(uncle_data_vec));
+
+    let block_with_proof_45 = blocks_with_proofs.get(8).expect("error");
+    let (input_data_raw_45, _) = create_data(block_with_proof_45, pre_difficulty);
+    output_data_vec.push(input_data_raw_45.clone());
+    let output_uncle_vec = vec![input_data_raw_38_1.clone(), input_data_raw_39_1.clone(), input_data_raw_45_1.clone()];
+    let output_data = create_cell_data(output_data_vec, Option::Some(output_uncle_vec));
+    let witness = Witness {
+        cell_dep_index_list: vec![0],
+        header: block_with_proof_45.header_rlp.0.clone(),
+        merkle_proof: block_with_proof_45.to_double_node_with_merkle_proof_vec(),
+    };
+    let case = generate_correct_case(Option::Some(input_data.as_bytes()), output_data.as_bytes(), witness);
+    run_test_case(case);
+}
+
+#[test]
+fn test_add_block_37_45_reorg_with_cache_limit() {
+    let blocks_with_proofs: Vec<BlockWithProofs> =
+        [
+            "../tests/src/eth_client/tests/data/height-10917844.json"
+            ,"../tests/src/eth_client/tests/data/height-10917845-1.json"
+            , "../tests/src/eth_client/tests/data/height-10917838-1.json"
+            , "../tests/src/eth_client/tests/data/height-10917839-1.json"
+            ,"../tests/src/eth_client/tests/data/height-10917845.json"
+        ]
+            .iter()
+            .map(|filename| read_block((&filename).to_string()))
+            .collect();
+
+    let block_with_proof_44 = blocks_with_proofs.get(0).expect("error");
+    let block_with_proof_45_1 = blocks_with_proofs.get(1).expect("error");
+    let (input_data_raw_44, input_difficulty_44) = create_data(block_with_proof_44, 0);
+    let (input_data_raw_45_1, _) = create_data(block_with_proof_45_1, input_difficulty_44);
+    // let input_data_vec = vec![input_data_raw_44.clone(), input_data_raw_45_1.clone()];
+    let mut input_data_vec = vec![];
+    let mut data = [0u8; 32];
+    data.copy_from_slice(hex::decode("8c75abd8ed0bd8ae98382fec6c082301b777929c9ae1021700cc344d6ef02780").expect("error").as_slice());
+    for _ in 0..490 {
+        input_data_vec.push(basic::Bytes::from(data.clone().to_vec()));
+    }
+    for _ in 0..9 {
+        input_data_vec.push(input_data_raw_44.clone());
+    }
+    input_data_vec.push(input_data_raw_45_1.clone());
+
+    let block_with_proof_38_1 = blocks_with_proofs.get(2).expect("error");
+    let block_with_proof_39_1 = blocks_with_proofs.get(3).expect("error");
+    let (input_data_raw_38_1, _) = create_data(block_with_proof_38_1, 0);
+    let (input_data_raw_39_1, _) = create_data(block_with_proof_39_1, 0);
+    let mut uncle_data_vec = vec![input_data_raw_38_1.clone()];
+    for _ in 0..9 {
+        uncle_data_vec.push(input_data_raw_39_1.clone())
+    }
+    let input_data = create_cell_data(input_data_vec, Option::Some(uncle_data_vec));
+
+    let block_with_proof_45 = blocks_with_proofs.get(4).expect("error");
+    let (input_data_raw_45, _) = create_data(block_with_proof_45, input_difficulty_44);
+    let mut output_data_vec = vec![];
+    for _ in 0..490 {
+        output_data_vec.push(basic::Bytes::from(data.clone().to_vec()));
+    }
+    for _ in 0..9 {
+        output_data_vec.push(input_data_raw_44.clone());
+    }
+    output_data_vec.push(input_data_raw_45.clone());
+    let mut output_uncle_vec = vec![];
+    for _ in 0..9 {
+        output_uncle_vec.push(input_data_raw_39_1.clone())
+    }
+    output_uncle_vec.push(input_data_raw_45_1.clone());
+    let output_data = create_cell_data(output_data_vec, Option::Some(output_uncle_vec));
+    let witness = Witness {
+        cell_dep_index_list: vec![0],
+        header: block_with_proof_45.header_rlp.0.clone(),
+        merkle_proof: block_with_proof_45.to_double_node_with_merkle_proof_vec(),
+    };
+    let case = generate_correct_case(Option::Some(input_data.as_bytes()), output_data.as_bytes(), witness);
+    run_test_case(case);
+}
+
+#[test]
 fn test_get_block() {
     get_blocks(&WEB3RS, 1,2);
 }

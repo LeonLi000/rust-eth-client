@@ -11,13 +11,14 @@ use eth_spv_lib::eth_types::*;
 use crate::types::basic::{ HeaderInfoReader, BytesVecReader};
 
 pub const MAIN_HEADER_CACHE_LIMIT: usize = 500;
-pub const UNCLE_HEADER_CACHE_LIMIT: usize = 500;
+pub const UNCLE_HEADER_CACHE_LIMIT: usize = 10;
+pub const CONFIRM: usize = 10;
 
 #[derive(Debug)]
 pub struct CellDataTuple(Option<CellDataView>, Option<CellDataView>);
 
 pub fn verify() -> Result<(), Error> {
-    debug!("begin input data");
+    debug!("load input data");
     let input_data = get_data(Source::GroupInput)?;
     debug!("load output data");
     let output_data = get_data(Source::GroupOutput)?.expect("should not happen");
@@ -33,17 +34,13 @@ fn verify_witness(input: &Option<CellDataView>, output: &CellDataView) -> Result
     if witness_args.is_none() {
         return Err(Error::InvalidWitness);
     }
-    debug!("verify verify_witness data.2");
     let witness_args = witness_args.to_opt().unwrap().raw_data();
-    debug!("verify verify_witness data.3");
     if WitnessReader::verify(&witness_args, false).is_err() {
         return Err(Error::InvalidWitness);
     }
-    debug!("verify verify_witness data.4");
     let witness = WitnessReader::new_unchecked(&witness_args);
     // parse header
     let header_raw = witness.header().raw_data();
-    debug!("verify input data.");
     // check input && output data
     let (header, prev) = match input {
         Some(data) => verify_input_output_data(data, output, header_raw)?,
@@ -135,6 +132,13 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
             let header_raw = main_output_reader.get_unchecked(main_output_reader.len() - 2).raw_data();
             prev = Option::Some(extra_header(header_raw)?);
         }
+
+        if main_output_reader.len() > MAIN_HEADER_CACHE_LIMIT
+            || main_input_reader.len() > MAIN_HEADER_CACHE_LIMIT
+            || uncle_output_reader.len() > UNCLE_HEADER_CACHE_LIMIT
+            || uncle_input_reader.len() > UNCLE_HEADER_CACHE_LIMIT {
+            return Err(Error::InvalidCellData);
+        }
         // if header.parent_hash == tail_input.hash => the chain is not reorg.
         // else do reorg.
         if main_tail_input.hash.unwrap() == header.parent_hash {
@@ -146,9 +150,6 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
             debug!("left difficulty u64: {} right difficulty u64: {}", to_u64(&left), right.checked_add(to_u64(&prev_difficult)).unwrap());
             assert_eq!(to_u64(&left), right.checked_add(to_u64(&prev_difficult)).unwrap(), "invalid difficulty.");
 
-            if main_output_reader.len() > MAIN_HEADER_CACHE_LIMIT {
-                return Err(Error::InvalidCellData);
-            }
             debug!("the uncle chain should be the same");
             verify_original_chain_data(main_input_reader, main_output_reader, MAIN_HEADER_CACHE_LIMIT)?;
             // the uncle chain should be the same.
@@ -157,7 +158,7 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
             debug!("warning: the main chain had been reorged.");
             let left = main_tail_info_input_reader.total_difficulty().raw_data();
             let right = main_tail_info_output_reader.total_difficulty().raw_data();
-            //FIXME: @leon difficulty need verify! right == header.difficulty + header.parent.total_difficulty
+            //difficulty need verify! right == header.difficulty + header.parent.total_difficulty
             let (_, difficulty) = get_parent_header(header.clone(), main_input_reader, uncle_input_reader)?;
             assert_eq!(to_u64(right), header.difficulty.0.as_u64() + difficulty, "invalid difficulty.");
 
@@ -183,6 +184,7 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
                         let hash_temp = extra_hash(header_info_temp)?;
                         debug!("hash_temp: {:?} current_hash: {:?}", hash_temp, current_hash.0.as_bytes());
                         if hash_temp == current_hash.0.as_bytes() {// the parent header is on main chain.
+                            // make sure the main chain is right.
                             let mut input_data = vec![];
                             for i in 0..main_input_reader.len()-offset {
                                 input_data.push(main_input_reader.get_unchecked(i).raw_data())
@@ -192,6 +194,23 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
                                 output_data.push(main_output_reader.get_unchecked(i).raw_data())
                             }
                             assert_eq!(input_data, output_data);
+                            // FIXME: make sure the uncle chain is right.
+                            if uncle_input_reader.len() + offset > UNCLE_HEADER_CACHE_LIMIT {
+                                let mut uncle_input_data = vec![];
+                                let begin = uncle_input_reader.len() + offset - UNCLE_HEADER_CACHE_LIMIT;
+
+                                for i in begin..uncle_input_reader.len() {
+                                    uncle_input_data.push(uncle_input_reader.get_unchecked(i).raw_data())
+                                }
+                                for i in main_input_reader.len()-offset..main_input_reader.len() {
+                                    uncle_input_data.push(main_input_reader.get_unchecked(i).raw_data())
+                                }
+                                let mut uncle_output_data = vec![];
+                                for i in 0..uncle_output_reader.len() {
+                                    uncle_output_data.push(uncle_output_reader.get_unchecked(i).raw_data())
+                                }
+                                assert_eq!(uncle_input_data, uncle_output_data, "invalid uncle chain data");
+                            }
                             break;
                         } else {// the parent header is on uncle chain.
                             traverse_uncle_chain(uncle_input_reader, &mut current_hash, &mut number)?;
@@ -247,6 +266,7 @@ fn get_parent_header(header: BlockHeader, main_input_reader: BytesVecReader, unc
     let main_tail_info = main_input_reader.get_unchecked(main_input_reader.len()-1).raw_data();
     let main_tail = extra_header(main_tail_info)?;
     let offset = (main_tail.number - header.number + 1) as usize;
+    assert_eq!(offset > CONFIRM, true, "can not revert a confirmed block.");
     let target_raw = main_input_reader.get_unchecked(main_input_reader.len()-1-offset).raw_data();
     let target = extra_header(target_raw)?;
     if target.hash.unwrap() == header.parent_hash {
@@ -291,25 +311,25 @@ fn traverse_uncle_chain(uncle_input_reader: BytesVecReader,  current_hash: &mut 
     Ok(())
 }
 
-fn verify_original_chain_data(uncle_input_reader: BytesVecReader, uncle_output_reader: BytesVecReader, limit: usize) -> Result<(), Error> {
-    if uncle_input_reader.len() == uncle_output_reader.len() && uncle_output_reader.len() == limit {
+fn verify_original_chain_data(input_reader: BytesVecReader, output_reader: BytesVecReader, limit: usize) -> Result<(), Error> {
+    if input_reader.len() == output_reader.len() && output_reader.len() == limit {
         let mut input_data = vec![];
-        for i in 1..uncle_input_reader.len() {
-            input_data.push(uncle_input_reader.get_unchecked(i).raw_data())
+        for i in 1..input_reader.len() {
+            input_data.push(input_reader.get_unchecked(i).raw_data())
         }
         let mut output_data = vec![];
-        for i in 0..uncle_output_reader.len()-1 {
-            output_data.push(uncle_output_reader.get_unchecked(i).raw_data())
+        for i in 0..output_reader.len()-1 {
+            output_data.push(output_reader.get_unchecked(i).raw_data())
         }
         assert_eq!(input_data, output_data, "invalid output data.");
-    } else if uncle_input_reader.len() < uncle_output_reader.len(){
+    } else if input_reader.len() < output_reader.len(){
         let mut input_data = vec![];
-        for i in 0..uncle_input_reader.len() {
-            input_data.push(uncle_input_reader.get_unchecked(i).raw_data())
+        for i in 0..input_reader.len() {
+            input_data.push(input_reader.get_unchecked(i).raw_data())
         }
         let mut output_data = vec![];
-        for i in 0..uncle_output_reader.len()-1 {
-            output_data.push(uncle_output_reader.get_unchecked(i).raw_data())
+        for i in 0..output_reader.len()-1 {
+            output_data.push(output_reader.get_unchecked(i).raw_data())
         }
         assert_eq!(input_data, output_data, "invalid output data.");
     } else {
@@ -361,7 +381,6 @@ fn parse_dep_data(witness: WitnessReader, number: u64) -> Result<H128, Error> {
 
 fn get_data(source: Source) -> Result<Option<CellDataView>, Error> {
     let data_list = QueryIter::new(load_cell_data, source).collect::<Vec<Vec<u8>>>();
-    debug!("load data: {:?}", data_list.len());
     match data_list.len() {
         0 => Ok(None),
         1 => Ok(Some(CellDataView::from_slice(
