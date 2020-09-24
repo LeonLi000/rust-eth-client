@@ -177,9 +177,8 @@ fn verify_input_output_data(input: &CellDataView, output: &CellDataView, header_
                     } else {
                         let offset = (main_tail_input.number - number) as usize;
                         debug!("offset: {:?}", offset);
-                        if offset > main_input_reader.len() {
-                            return Err(Error::InvalidCellData);
-                        }
+                        assert_eq!(offset < main_input_reader.len(), true, "invalid cell data");
+                        assert_eq!(offset < CONFIRM, true, "can not revert confirmed block.");
                         let header_info_temp = main_input_reader.get_unchecked(main_input_reader.len()-1-offset).raw_data();
                         let hash_temp = extra_hash(header_info_temp)?;
                         debug!("hash_temp: {:?} current_hash: {:?}", hash_temp, current_hash.0.as_bytes());
@@ -266,7 +265,7 @@ fn get_parent_header(header: BlockHeader, main_input_reader: BytesVecReader, unc
     let main_tail_info = main_input_reader.get_unchecked(main_input_reader.len()-1).raw_data();
     let main_tail = extra_header(main_tail_info)?;
     let offset = (main_tail.number - header.number + 1) as usize;
-    assert_eq!(offset > CONFIRM, true, "can not revert a confirmed block.");
+    assert_eq!(offset < CONFIRM, true, "can not revert a confirmed block.");
     let target_raw = main_input_reader.get_unchecked(main_input_reader.len()-1-offset).raw_data();
     let target = extra_header(target_raw)?;
     if target.hash.unwrap() == header.parent_hash {
